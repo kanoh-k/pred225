@@ -67,6 +67,7 @@ docs/_build/
 target/
 
 # IPython Notebook
+*.ipynb
 .ipynb_checkpoints
 
 # pyenv
@@ -89,4 +90,8 @@ ENV/
 .ropeproject
 
 # Stock data
-./data/*
+data/
+notebook/
+
+sandbox.py
+pred.py

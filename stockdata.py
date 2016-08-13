@@ -2,7 +2,10 @@ import numpy as np
 import pandas as pd
 import os
 import urllib.request
+import quandl
 
+quandl.ApiConfig.api_key = "Your API Key"
+quandl.ApiConfig.api_version = "2015-04-09"
 
 # List of indices we are interested in
 INDEX_LIST = ["N225",   # Nikkei 225, Japan
@@ -10,10 +13,10 @@ INDEX_LIST = ["N225",   # Nikkei 225, Japan
                "AORD",  # All Ords, Australia
                "STI",   # STI Index, Singapore
                "GDAXI", # DAX, German
-               "FTSE",  # FTSE 100, UK
+#               "FTSE",  # FTSE 100, UK
                "DJI",   # Dow, US
                "GSPC",  # S&P 500, US
-               "IXIC",  # NASDAQ, US
+#               "IXIC",  # NASDAQ, US
                "BVSP"]  # BOVESPA, Brazil
 
 # Mapping from an index to its display text
@@ -42,8 +45,7 @@ class StockData(object):
         if not os.path.exists(self.basedir):
             os.mkdir(self.basedir)
 
-        self.baseurl = r"http://real-chart.finance.yahoo.com/table.csv?ignore=.csv&s=%5E"
-        self.baseurl2 = r"http://www.m2j.co.jp/market/pchistry_dl.php?type=d&ccy="
+        self.baseurl = r"http://www.m2j.co.jp/market/pchistry_dl.php?type=d&ccy="
 
     def download(self):
         """Download historical data for major markets to "./data/<code>.csv"
@@ -51,19 +53,16 @@ class StockData(object):
         # Stock markets
         for index in INDEX_LIST:
             filename = self.basedir + index + ".csv"
-            url = self.baseurl + index
             try:
-                with urllib.request.urlopen(urllib.request.Request(url)) as response:
-                    message = response.read()
-                    with open(filename, "wb") as f:
-                        f.write(message)
+                data = quandl.get("YAHOO/INDEX_" + index)
+                data.to_csv(filename)
             except:
-                print("Error:", url)
+                print("Error: failed to download" + index)
 
         # Exchange rates
         for pair in CURRENCY_PAIR_LIST:
             filename = self.basedir + pair + ".csv"
-            url = self.baseurl2 + str(CURRENCY_PAIR_TO_ID[pair])
+            url = self.baseurl + str(CURRENCY_PAIR_TO_ID[pair])
             try:
                 with urllib.request.urlopen(urllib.request.Request(url)) as response:
                     message = response.read()
@@ -196,7 +195,3 @@ class ExchangeRateData(object):
             if logreturn:
                 closing_data[pair] = np.log(closing_data[pair] / closing_data[pair].shift())
         return closing_data
-
-
-# e = ExchangeRateData()
-# e.get_closing_data(normalize=True, logreturn=True)

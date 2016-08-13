@@ -2,9 +2,39 @@ import pandas as pd
 import tensorflow as tf
 from stockdata import StockData, INDEX_LIST, INDEX_TO_DISPLAY_TEXT, CURRENCY_PAIR_LIST
 
-def tf_confusion_metrics(model, actual_classes, session, feed_dict):
+def inference_no_hidden(feature_data, num_predictors, num_classes):
+    weights = tf.Variable(tf.truncated_normal([num_predictors, num_classes], stddev=0.0001))
+    biases = tf.Variable(tf.ones([num_classes]))
+
+    model = tf.nn.softmax(tf.matmul(feature_data, weights) + biases)
+    return model
+
+def inference_two_hidden(feature_data, num_predictors, num_classes, num_indices):
+    weights1 = tf.Variable(tf.truncated_normal([num_indices, 50], stddev=0.0001))
+    biases1 = tf.Variable(tf.ones([50]))
+
+    weights2 = tf.Variable(tf.truncated_normal([50, 25], stddev=0.0001))
+    biases2 = tf.Variable(tf.ones([25]))
+
+    weights3 = tf.Variable(tf.truncated_normal([25, 2], stddev=0.0001))
+    biases3 = tf.Variable(tf.ones([2]))
+
+    hidden_layer_1 = tf.nn.relu(tf.matmul(feature_data, weights1) + biases1)
+    hidden_layer_2 = tf.nn.relu(tf.matmul(hidden_layer_1, weights2) + biases2)
+    model = tf.nn.softmax(tf.matmul(hidden_layer_2, weights3) + biases3)
+    return model
+
+def loss(model, labels):
+    cost = -tf.reduce_sum(labels*tf.log(model))
+    return cost
+
+def training(cost, learning_rate=0.0001):
+    training_op = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
+    return training_op
+
+def tf_confusion_metrics(model, labels, session, feed_dict):
   predictions = tf.argmax(model, 1)
-  actuals = tf.argmax(actual_classes, 1)
+  actuals = tf.argmax(labels, 1)
 
   ones_like_actuals = tf.ones_like(actuals)
   zeros_like_actuals = tf.zeros_like(actuals)
@@ -111,63 +141,50 @@ def create_training_test_data():
     test_classes_tf = classes_tf[training_set_size:]
     return training_predictors_tf, training_classes_tf, test_predictors_tf, test_classes_tf
 
-# 2 hideen layers
 def evaluate_model():
     training_predictors_tf, training_classes_tf, test_predictors_tf, test_classes_tf = create_training_test_data()
-    sess1 = tf.Session()
 
     num_predictors = len(training_predictors_tf.columns)
     num_classes = len(training_classes_tf.columns)
     num_indices = training_predictors_tf.shape[1]
 
     feature_data = tf.placeholder("float", [None, num_predictors])
-    actual_classes = tf.placeholder("float", [None, 2])
+    labels = tf.placeholder("float", [None, 2])
 
-    weights1 = tf.Variable(tf.truncated_normal([num_indices, 50], stddev=0.0001))
-    biases1 = tf.Variable(tf.ones([50]))
+    with tf.Session() as sess:
+        #model = inference_no_hidden(feature_data, num_predictors, num_classes)
+        model = inference_two_hidden(feature_data, num_predictors, num_classes, num_indices)
+        cost = loss(model, labels)
+        training_op = training(cost, learning_rate=0.0001)
 
-    weights2 = tf.Variable(tf.truncated_normal([50, 25], stddev=0.0001))
-    biases2 = tf.Variable(tf.ones([25]))
+        correct_prediction = tf.equal(tf.argmax(model, 1), tf.argmax(labels, 1))
+        accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
 
-    weights3 = tf.Variable(tf.truncated_normal([25, 2], stddev=0.0001))
-    biases3 = tf.Variable(tf.ones([2]))
+        init = tf.initialize_all_variables()
+        sess.run(init)
 
-    # This time we introduce a single hidden layer into our model...
-    hidden_layer_1 = tf.nn.relu(tf.matmul(feature_data, weights1) + biases1)
-    hidden_layer_2 = tf.nn.relu(tf.matmul(hidden_layer_1, weights2) + biases2)
-    model = tf.nn.softmax(tf.matmul(hidden_layer_2, weights3) + biases3)
+        for i in range(1, 30001):
+            sess.run(
+            training_op,
+            feed_dict={
+              feature_data: training_predictors_tf.values,
+              labels: training_classes_tf.values.reshape(len(training_classes_tf.values), 2)
+            }
+          )
+            if i%5000 == 0:
+                print (i, sess.run(
+                  accuracy,
+                  feed_dict={
+                    feature_data: training_predictors_tf.values,
+                    labels: training_classes_tf.values.reshape(len(training_classes_tf.values), 2)
+                  }
+                ))
 
-    cost = -tf.reduce_sum(actual_classes*tf.log(model))
 
-    train_op1 = tf.train.AdamOptimizer(learning_rate=0.0001).minimize(cost)
+        feed_dict= {
+            feature_data: test_predictors_tf.values,
+            labels: test_classes_tf.values.reshape(len(test_classes_tf.values), 2)}
 
-    init = tf.initialize_all_variables()
-    sess1.run(init)
-
-    correct_prediction = tf.equal(tf.argmax(model, 1), tf.argmax(actual_classes, 1))
-    accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
-
-    for i in range(1, 30001):
-      sess1.run(
-        train_op1,
-        feed_dict={
-          feature_data: training_predictors_tf.values,
-          actual_classes: training_classes_tf.values.reshape(len(training_classes_tf.values), 2)
-        }
-      )
-      if i%5000 == 0:
-        print (i, sess1.run(
-          accuracy,
-          feed_dict={
-            feature_data: training_predictors_tf.values,
-            actual_classes: training_classes_tf.values.reshape(len(training_classes_tf.values), 2)
-          }
-        ))
-
-    feed_dict= {
-        feature_data: test_predictors_tf.values,
-        actual_classes: test_classes_tf.values.reshape(len(test_classes_tf.values), 2)}
-
-    tf_confusion_metrics(model, actual_classes, sess1, feed_dict)
+        tf_confusion_metrics(model, labels, sess, feed_dict)
 
 evaluate_model()
