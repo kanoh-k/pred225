@@ -1,5 +1,6 @@
 import pandas as pd
 import tensorflow as tf
+from datetime import datetime
 from stockdata import StockData, INDEX_LIST, INDEX_TO_DISPLAY_TEXT, CURRENCY_PAIR_LIST
 
 def inference_no_hidden(feature_data, num_predictors, num_classes):
@@ -24,9 +25,11 @@ def inference_two_hidden(feature_data, num_predictors, num_classes, num_indices)
     model = tf.nn.softmax(tf.matmul(hidden_layer_2, weights3) + biases3)
     return model
 
+# Returns loss function and its summary string
 def loss(model, labels):
     cost = -tf.reduce_sum(labels*tf.log(model))
-    return cost
+    return cost ,tf.scalar_summary("Cross entropy", cost)
+
 
 def training(cost, learning_rate=0.0001):
     training_op = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
@@ -143,6 +146,7 @@ def create_training_test_data():
 
 def evaluate_model():
     training_predictors_tf, training_classes_tf, test_predictors_tf, test_classes_tf = create_training_test_data()
+    subdir = datetime.now().strftime("%Y%m%d%H%M%S")
 
     num_predictors = len(training_predictors_tf.columns)
     num_classes = len(training_classes_tf.columns)
@@ -151,40 +155,51 @@ def evaluate_model():
     feature_data = tf.placeholder("float", [None, num_predictors])
     labels = tf.placeholder("float", [None, 2])
 
+    train_dict = {
+        feature_data: training_predictors_tf.values,
+        labels: training_classes_tf.values.reshape(len(training_classes_tf.values), 2)}
+
+    test_dict = {
+        feature_data: test_predictors_tf.values,
+        labels: test_classes_tf.values.reshape(len(test_classes_tf.values), 2)}
+
     with tf.Session() as sess:
         #model = inference_no_hidden(feature_data, num_predictors, num_classes)
         model = inference_two_hidden(feature_data, num_predictors, num_classes, num_indices)
-        cost = loss(model, labels)
+        cost, cost_summary_op = loss(model, labels)
         training_op = training(cost, learning_rate=0.0001)
+
 
         correct_prediction = tf.equal(tf.argmax(model, 1), tf.argmax(labels, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+        accuracy_op_train = tf.scalar_summary("Accuracy on Train", accuracy)
+        accuracy_op_test = tf.scalar_summary("Accuracy on Test", accuracy)
+
+        # Merge all variable summaries and save the results to log file
+        # summary_op = tf.merge_all_summaries()
+        summary_op_train = tf.merge_summary([cost_summary_op, accuracy_op_train])
+        summary_op_test = tf.merge_summary([accuracy_op_test])
+        summary_writer = tf.train.SummaryWriter("/tmp/pred225_log/" + subdir, sess.graph)
 
         init = tf.initialize_all_variables()
         sess.run(init)
 
         for i in range(1, 30001):
-            sess.run(
-            training_op,
-            feed_dict={
-              feature_data: training_predictors_tf.values,
-              labels: training_classes_tf.values.reshape(len(training_classes_tf.values), 2)
-            }
-          )
+            sess.run(training_op, feed_dict=train_dict)
+
+            # Write summary to log
+            if i % 100 == 0:
+                # summary_str = sess.run(summary_op, feed_dict=train_dict)
+                summary_str = sess.run(summary_op_train, feed_dict=train_dict)
+                summary_writer.add_summary(summary_str, i)
+                summary_str = sess.run(summary_op_test, feed_dict=test_dict)
+                summary_writer.add_summary(summary_str, i)
+                summary_writer.flush()
+
+            # Print current accuracy to console
             if i%5000 == 0:
-                print (i, sess.run(
-                  accuracy,
-                  feed_dict={
-                    feature_data: training_predictors_tf.values,
-                    labels: training_classes_tf.values.reshape(len(training_classes_tf.values), 2)
-                  }
-                ))
+                print (i, sess.run(accuracy, feed_dict=train_dict))
 
-
-        feed_dict= {
-            feature_data: test_predictors_tf.values,
-            labels: test_classes_tf.values.reshape(len(test_classes_tf.values), 2)}
-
-        tf_confusion_metrics(model, labels, sess, feed_dict)
+        tf_confusion_metrics(model, labels, sess, test_dict)
 
 evaluate_model()
