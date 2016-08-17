@@ -3,33 +3,35 @@ import tensorflow as tf
 from datetime import datetime
 from stockdata import StockData, INDEX_LIST, INDEX_TO_DISPLAY_TEXT, CURRENCY_PAIR_LIST
 
-def inference_no_hidden(feature_data, num_predictors, num_classes):
-    weights = tf.Variable(tf.truncated_normal([num_predictors, num_classes], stddev=0.0001))
-    biases = tf.Variable(tf.ones([num_classes]))
+def inference(feature_data, layers):
+    """ Create a model with given numbers of layters.
 
-    model = tf.nn.softmax(tf.matmul(feature_data, weights) + biases)
-    return model
+    'layers' is the list of integers. Each element in the list defines the number
+    of nodes in each layer. layers[0] is an input layer, layers[-1] is an output
+    layer. Other layers[i] means i-th hidden layer.
+    :type feature_data: ???
+    :type layers: List<int>
+    """
+    if len(layers) < 2:
+        raise Exception("'layers' should have more than one elements")
 
-def inference_two_hidden(feature_data, num_predictors, num_classes, num_indices):
-    weights1 = tf.Variable(tf.truncated_normal([num_indices, 50], stddev=0.0001))
-    biases1 = tf.Variable(tf.ones([50]))
+    previous_layer = feature_data
+    for i in range(len(layers) - 2):
+        with tf.name_scope("Hidden" + str(i + 1)):
+            weights = tf.Variable(tf.truncated_normal([layers[i], layers[i + 1]], stddev=0.0001))
+            biases = tf.Variable(tf.ones([layers[i + 1]]))
+            previous_layer = tf.nn.relu(tf.matmul(previous_layer, weights) + biases)
 
-    weights2 = tf.Variable(tf.truncated_normal([50, 25], stddev=0.0001))
-    biases2 = tf.Variable(tf.ones([25]))
-
-    weights3 = tf.Variable(tf.truncated_normal([25, 2], stddev=0.0001))
-    biases3 = tf.Variable(tf.ones([2]))
-
-    hidden_layer_1 = tf.nn.relu(tf.matmul(feature_data, weights1) + biases1)
-    hidden_layer_2 = tf.nn.relu(tf.matmul(hidden_layer_1, weights2) + biases2)
-    model = tf.nn.softmax(tf.matmul(hidden_layer_2, weights3) + biases3)
-    return model
+    with tf.name_scope("Output"):
+        weights = tf.Variable(tf.truncated_normal([layers[-2], layers[-1]], stddev=0.0001))
+        biases = tf.Variable(tf.ones([layers[-1]]))
+        model = tf.nn.softmax(tf.matmul(previous_layer, weights) + biases)
+        return model
 
 # Returns loss function and its summary string
 def loss(model, labels):
     cost = -tf.reduce_sum(labels*tf.log(model))
     return cost ,tf.scalar_summary("Cross entropy", cost)
-
 
 def training(cost, learning_rate=0.0001):
     training_op = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
@@ -144,16 +146,17 @@ def create_training_test_data():
     test_classes_tf = classes_tf[training_set_size:]
     return training_predictors_tf, training_classes_tf, test_predictors_tf, test_classes_tf
 
-def evaluate_model():
+def evaluate_model(intermediate_layers=[]):
     training_predictors_tf, training_classes_tf, test_predictors_tf, test_classes_tf = create_training_test_data()
-    subdir = datetime.now().strftime("%Y%m%d%H%M%S")
 
     num_predictors = len(training_predictors_tf.columns)
     num_classes = len(training_classes_tf.columns)
-    num_indices = training_predictors_tf.shape[1]
 
     feature_data = tf.placeholder("float", [None, num_predictors])
     labels = tf.placeholder("float", [None, 2])
+
+    layers = [num_predictors] + intermediate_layers + [num_classes]
+    experiment_name = '-'.join([str(n) for n in layers])
 
     train_dict = {
         feature_data: training_predictors_tf.values,
@@ -164,11 +167,9 @@ def evaluate_model():
         labels: test_classes_tf.values.reshape(len(test_classes_tf.values), 2)}
 
     with tf.Session() as sess:
-        #model = inference_no_hidden(feature_data, num_predictors, num_classes)
-        model = inference_two_hidden(feature_data, num_predictors, num_classes, num_indices)
+        model = inference(feature_data, layers)
         cost, cost_summary_op = loss(model, labels)
         training_op = training(cost, learning_rate=0.0001)
-
 
         correct_prediction = tf.equal(tf.argmax(model, 1), tf.argmax(labels, 1))
         accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
@@ -179,7 +180,7 @@ def evaluate_model():
         # summary_op = tf.merge_all_summaries()
         summary_op_train = tf.merge_summary([cost_summary_op, accuracy_op_train])
         summary_op_test = tf.merge_summary([accuracy_op_test])
-        summary_writer = tf.train.SummaryWriter("/tmp/pred225_log/" + subdir, sess.graph)
+        summary_writer = tf.train.SummaryWriter("/tmp/pred225_log/" + experiment_name, sess.graph)
 
         init = tf.initialize_all_variables()
         sess.run(init)
@@ -202,4 +203,19 @@ def evaluate_model():
 
         tf_confusion_metrics(model, labels, sess, test_dict)
 
-evaluate_model()
+def evaluate_models():
+    experiments = [
+        [],
+        [25],
+        [50],
+        [100],
+        [50, 25],
+        [100, 50],
+        [100, 50, 25]
+    ]
+
+    for layers in experiments:
+        evaluate_model(layers)
+
+if __name__ == "__main__":
+    evaluate_models()
