@@ -37,6 +37,8 @@ def training(cost, learning_rate=0.0001):
     training_op = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
     return training_op
 
+# Note: This function is currently invalid as # of output classes
+#       has been changed to three. I will re-implement this later.
 def tf_confusion_metrics(model, labels, session, feed_dict):
   predictions = tf.argmax(model, 1)
   actuals = tf.argmax(labels, 1)
@@ -110,32 +112,44 @@ def tf_confusion_metrics(model, labels, session, feed_dict):
 def create_training_test_data():
     s = StockData()
     #s.download()
-    closing_data = s.get_closing_data(1000, True, True)
+    opening_data, closing_data, diff_data, jump_data = s.get_daily_data(1000, True, True)
 
-    closing_data["N225_positive"] = 0
-    closing_data.ix[closing_data["N225"] >= 0, "N225_positive"] = 1
-    closing_data["N225_negative"] = 0
-    closing_data.ix[closing_data["N225"] < 0, "N225_negative"] = 1
+    threshold = 0.003
+    closing_data["N225_up"] = 0
+    closing_data.ix[diff_data["N225"] >= threshold, "N225_up"] = 1
+    closing_data["N225_down"] = 0
+    closing_data.ix[diff_data["N225"] <= -threshold, "N225_down"] = 1
+    closing_data["N225_same"] = 0
+    closing_data.ix[(-threshold < diff_data["N225"]) & (diff_data["N225"] < threshold), "N225_same"] = 1
+
+    columns = ["N225_up", "N225_down", "N225_same"] + ["N225_jump"]\
+    + [s + "_1_o" for s in INDEX_LIST[1:]] + [s + "_1_o" for s in CURRENCY_PAIR_LIST] \
+    + [s + "_1_c" for s in INDEX_LIST[1:]] + [s + "_1_c" for s in CURRENCY_PAIR_LIST] \
+    + [s + "_1_d" for s in INDEX_LIST[1:]] + [s + "_1_d" for s in CURRENCY_PAIR_LIST]
 
     training_test_data = pd.DataFrame(
-        # column name is "<index>_<day>".
-        # E.g., "DJI_1" means yesterday's Dow.
-        columns= ["N225_positive", "N225_negative"] + [s + "_1" for s in INDEX_LIST[1:]] + [s + "_1" for s in CURRENCY_PAIR_LIST]
+        # column name is "<index>_<day>_<type>".
+        # E.g., "DJI_1_c" means yesterday's Dow closing value.
+        columns=columns
     )
 
     for i in range(7, len(closing_data)):
         data = {}
         # We will use today's data for positive/negative labels
-        data["N225_positive"] = closing_data["N225_positive"].ix[i]
-        data["N225_negative"] = closing_data["N225_negative"].ix[i]
+        data["N225_up"] = closing_data["N225_up"].ix[i]
+        data["N225_down"] = closing_data["N225_down"].ix[i]
+        data["N225_same"] = closing_data["N225_same"].ix[i]
+        data["N225_jump"] = jump_data["N225"].ix[i]
         # Use yesterday's data for world market data
         for col in INDEX_LIST[1:] + CURRENCY_PAIR_LIST:
-            data[col + "_1"] = closing_data[col].ix[i - 1]
+            data[col + "_1_o"] = closing_data[col].ix[i - 1]
+            data[col + "_1_c"] = opening_data[col].ix[i - 1]
+            data[col + "_1_d"] = diff_data[col].ix[i - 1]
         training_test_data = training_test_data.append(data, ignore_index=True)
 
     # Prepare training data and test data
-    predictors_tf = training_test_data[training_test_data.columns[2:]]
-    classes_tf = training_test_data[training_test_data.columns[:2]]
+    predictors_tf = training_test_data[training_test_data.columns[3:]]
+    classes_tf = training_test_data[training_test_data.columns[:3]]
 
     training_set_size = int(len(training_test_data) * 0.8)
     test_set_size = len(training_test_data) - training_set_size
@@ -153,18 +167,18 @@ def evaluate_model(intermediate_layers=[]):
     num_classes = len(training_classes_tf.columns)
 
     feature_data = tf.placeholder("float", [None, num_predictors])
-    labels = tf.placeholder("float", [None, 2])
+    labels = tf.placeholder("float", [None, num_classes])
 
     layers = [num_predictors] + intermediate_layers + [num_classes]
     experiment_name = '-'.join([str(n) for n in layers])
 
     train_dict = {
         feature_data: training_predictors_tf.values,
-        labels: training_classes_tf.values.reshape(len(training_classes_tf.values), 2)}
+        labels: training_classes_tf.values.reshape(len(training_classes_tf.values), num_classes)}
 
     test_dict = {
         feature_data: test_predictors_tf.values,
-        labels: test_classes_tf.values.reshape(len(test_classes_tf.values), 2)}
+        labels: test_classes_tf.values.reshape(len(test_classes_tf.values), num_classes)}
 
     with tf.Session() as sess:
         model = inference(feature_data, layers)
@@ -180,7 +194,7 @@ def evaluate_model(intermediate_layers=[]):
         # summary_op = tf.merge_all_summaries()
         summary_op_train = tf.merge_summary([cost_summary_op, accuracy_op_train])
         summary_op_test = tf.merge_summary([accuracy_op_test])
-        summary_writer = tf.train.SummaryWriter("/tmp/pred225_log/" + experiment_name, sess.graph)
+        summary_writer = tf.train.SummaryWriter("/tmp/pred225_log2/" + experiment_name, sess.graph)
 
         init = tf.initialize_all_variables()
         sess.run(init)
@@ -211,7 +225,9 @@ def evaluate_models():
         [100],
         [50, 25],
         [100, 50],
-        [100, 50, 25]
+        [50, 25, 10],
+        [100, 50, 25],
+        [200, 100, 50]
     ]
 
     for layers in experiments:
