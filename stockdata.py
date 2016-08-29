@@ -72,8 +72,7 @@ class StockData(object):
                 print("Error:", url)
                 print(e)
 
-
-    def get_daily_data(self, days=1000, normalize=True, logreturn=True):
+    def get_daily_data(self, days=1000, normalize=True, logreturn=True, start_date=None, end_date=None, fill_empty=True):
         """ Get closing data for indecis.
 
         If days is given, return the data for last <days> days.
@@ -83,16 +82,16 @@ class StockData(object):
         :type logscale: bool
         :rtype: pandas.DataFrame
         """
-        today = np.datetime64("today")
-        start_date = today - np.timedelta64(days, 'D')
-        stock_data = self.get_stock_market_daily_data(start_date, today, normalize, logreturn)
-        exchange_rate = self.get_exchange_rate_daily_data(start_date, today, normalize, logreturn)
+        end_date = np.datetime64("today") if end_date is None else end_date
+        start_date = end_date - np.timedelta64(days, 'D') if start_date is None else start_date
+        stock_data = self.get_stock_market_daily_data(start_date, end_date, normalize, logreturn, fill_empty=fill_empty)
+        exchange_rate = self.get_exchange_rate_daily_data(start_date, end_date, normalize, logreturn, fill_empty=fill_empty)
 
         opening_data, closing_data, diff_data, jump_data = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-        opening_data['Date'] = pd.date_range(start_date, periods=1000, freq='D')
-        closing_data['Date'] = pd.date_range(start_date, periods=1000, freq='D')
-        diff_data['Date'] = pd.date_range(start_date, periods=1000, freq='D')
-        jump_data['Date'] = pd.date_range(start_date, periods=1000, freq='D')
+        opening_data['Date'] = pd.date_range(start=start_date, end=end_date, freq='D')
+        closing_data['Date'] = pd.date_range(start=start_date, end=end_date, freq='D')
+        diff_data['Date'] = pd.date_range(start=start_date, end=end_date, freq='D')
+        jump_data['Date'] = pd.date_range(start=start_date, end=end_date, freq='D')
         opening_data = opening_data.set_index("Date")
         closing_data = closing_data.set_index("Date")
         diff_data = diff_data.set_index("Date")
@@ -116,13 +115,14 @@ class StockData(object):
             jump_data[pair] = exchange_rate[3][pair]
 
         # TODO: fillnaはここでやるべき
-        opening_data = opening_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
-        closing_data = closing_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
-        diff_data = diff_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
-        jump_data = jump_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
+        if fill_empty:
+            opening_data = opening_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
+            closing_data = closing_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
+            diff_data = diff_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
+            jump_data = jump_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
         return opening_data, closing_data, diff_data, jump_data
 
-    def get_stock_market_daily_data(self, start_date, end_date, normalize=True, logreturn=True):
+    def get_stock_market_daily_data(self, start_date, end_date, normalize=True, logreturn=True, fill_empty=True):
         """ Get closing data for indecis.
 
         If days is given, return the data for last <days> days.
@@ -143,8 +143,9 @@ class StockData(object):
 
         # Reverse the dataframe as CSV contains data in desc order
         # Also, fill empty cells by fillna method
-        opening_data = opening_data.fillna(method="ffill")[::-1].fillna(method="ffill")
-        closing_data = closing_data.fillna(method="ffill")[::-1].fillna(method="ffill")
+        if fill_empty:
+            opening_data = opening_data.fillna(method="ffill")[::-1].fillna(method="ffill")
+            closing_data = closing_data.fillna(method="ffill")[::-1].fillna(method="ffill")
         diff_data = closing_data / opening_data - 1
         jump_data = opening_data / closing_data.shift() - 1
 
@@ -158,7 +159,7 @@ class StockData(object):
                 closing_data[index] = np.log(closing_data[index] / closing_data[index].shift())
         return opening_data, closing_data, diff_data, jump_data
 
-    def get_exchange_rate_daily_data(self, start_date, end_date, normalize=True, logreturn=True):
+    def get_exchange_rate_daily_data(self, start_date, end_date, normalize=True, logreturn=True, fill_empty=True):
         opening_data, closing_data = pd.DataFrame(), pd.DataFrame()
         for pair in CURRENCY_PAIR_LIST:
             filename = self.basedir + pair + ".csv"
@@ -172,8 +173,9 @@ class StockData(object):
 
         # Reverse the dataframe as CSV contains data in desc order
         # Also, fill empty cells by fillna method
-        opening_data = opening_data.fillna(method="ffill")[::-1].fillna(method="ffill")
-        closing_data = closing_data.fillna(method="ffill")[::-1].fillna(method="ffill")
+        if fill_empty:
+            opening_data = opening_data.fillna(method="ffill")[::-1].fillna(method="ffill")
+            closing_data = closing_data.fillna(method="ffill")[::-1].fillna(method="ffill")
         diff_data = closing_data / opening_data - 1
         jump_data = opening_data / closing_data.shift() - 1
 

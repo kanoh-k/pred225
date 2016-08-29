@@ -93,5 +93,17 @@ ENV/
 data/
 notebook/
 
+# Tensorflow Model
+*.ckpt
+*.meta
+
+*.lnk
+*.csv
+
+backup.py
+download.py
 sandbox.py
 pred.py
+predict.py
+
+checkpoint
