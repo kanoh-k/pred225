@@ -11,12 +11,10 @@ quandl.ApiConfig.api_version = "2015-04-09"
 INDEX_LIST = ["N225",   # Nikkei 225, Japan
                "HSI",   # Hang Seng, Hong Kong
                "AORD",  # All Ords, Australia
-               "STI",   # STI Index, Singapore
                "GDAXI", # DAX, German
-#               "FTSE",  # FTSE 100, UK
                "DJI",   # Dow, US
                "GSPC",  # S&P 500, US
-#               "IXIC",  # NASDAQ, US
+               "SSEC",  # Shanghai Composite Index (China)
                "BVSP"]  # BOVESPA, Brazil
 
 # Mapping from an index to its display text
@@ -30,6 +28,7 @@ INDEX_TO_DISPLAY_TEXT = {
     "DJI": "Dow",
     "GSPC": "S&P 500",
     "IXIC": "NASDAQ",
+    "SSEC": "Shanghai",
     "BVSP": "BOVESPA"
 }
 
@@ -57,7 +56,7 @@ class StockData(object):
                 data = quandl.get("YAHOO/INDEX_" + index)
                 data.to_csv(filename)
             except:
-                print("Error: failed to download" + index)
+                print("Error: failed to download " + index)
 
         # Exchange rates
         for pair in CURRENCY_PAIR_LIST:
@@ -116,10 +115,10 @@ class StockData(object):
 
         # TODO: fillnaはここでやるべき
         if fill_empty:
-            opening_data = opening_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
-            closing_data = closing_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
-            diff_data = diff_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
-            jump_data = jump_data[::-1].fillna(method="ffill")[::-1].fillna(method="ffill")
+            opening_data = opening_data.fillna(method="ffill")[::-1].fillna(method="ffill")[::-1]
+            closing_data = closing_data.fillna(method="ffill")[::-1].fillna(method="ffill")[::-1]
+            diff_data = diff_data.fillna(method="ffill")[::-1].fillna(method="ffill")[::-1]
+            jump_data = jump_data.fillna(method="ffill")[::-1].fillna(method="ffill")[::-1]
         return opening_data, closing_data, diff_data, jump_data
 
     def get_stock_market_daily_data(self, start_date, end_date, normalize=True, logreturn=True, fill_empty=True):
@@ -143,9 +142,9 @@ class StockData(object):
 
         # Reverse the dataframe as CSV contains data in desc order
         # Also, fill empty cells by fillna method
-        if fill_empty:
-            opening_data = opening_data.fillna(method="ffill")[::-1].fillna(method="ffill")
-            closing_data = closing_data.fillna(method="ffill")[::-1].fillna(method="ffill")
+        # if fill_empty:
+        filled_opening_data = opening_data.fillna(method="ffill")
+        filled_closing_data = closing_data.fillna(method="ffill")
         diff_data = closing_data / opening_data - 1
         jump_data = opening_data / closing_data.shift() - 1
 
@@ -155,8 +154,8 @@ class StockData(object):
                 opening_data[index] = opening_data[index] / max(opening_data[index])
                 closing_data[index] = closing_data[index] / max(closing_data[index])
             if logreturn:
-                opening_data[index] = np.log(opening_data[index] / opening_data[index].shift())
-                closing_data[index] = np.log(closing_data[index] / closing_data[index].shift())
+                opening_data[index] = np.log(opening_data[index] / filled_opening_data[index].shift())
+                closing_data[index] = np.log(closing_data[index] / filled_closing_data[index].shift())
         return opening_data, closing_data, diff_data, jump_data
 
     def get_exchange_rate_daily_data(self, start_date, end_date, normalize=True, logreturn=True, fill_empty=True):
@@ -173,9 +172,9 @@ class StockData(object):
 
         # Reverse the dataframe as CSV contains data in desc order
         # Also, fill empty cells by fillna method
-        if fill_empty:
-            opening_data = opening_data.fillna(method="ffill")[::-1].fillna(method="ffill")
-            closing_data = closing_data.fillna(method="ffill")[::-1].fillna(method="ffill")
+        # if fill_empty:
+        filled_opening_data = opening_data.fillna(method="ffill")
+        filled_closing_data = closing_data.fillna(method="ffill")
         diff_data = closing_data / opening_data - 1
         jump_data = opening_data / closing_data.shift() - 1
 
@@ -185,6 +184,6 @@ class StockData(object):
                 opening_data[pair] = opening_data[pair] / max(opening_data[pair])
                 closing_data[pair] = closing_data[pair] / max(closing_data[pair])
             if logreturn:
-                opening_data[pair] = np.log(opening_data[pair] / opening_data[pair].shift())
-                closing_data[pair] = np.log(closing_data[pair] / closing_data[pair].shift())
+                opening_data[pair] = np.log(opening_data[pair] / filled_opening_data[pair].shift())
+                closing_data[pair] = np.log(closing_data[pair] / filled_closing_data[pair].shift())
         return opening_data, closing_data, diff_data, jump_data

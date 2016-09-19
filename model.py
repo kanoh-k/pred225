@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 import random
+import os
 from datetime import datetime
 from tensorflow.python.framework import ops
 from stockdata import StockData, INDEX_LIST, INDEX_TO_DISPLAY_TEXT, CURRENCY_PAIR_LIST
@@ -10,12 +11,13 @@ class NikkeiModel:
     def __init__(self, hidden_layers, model_name):
         self.max_iteration = 30001
         self.threshold = 0.003
-        self.log_dir = "/tmp/pred225_log3/"
-        self.backtest_result = "test.csv"
+        self.log_dir = "/tmp/pred225_log/"
+        self.backtest_result = model_name + "_backtest.csv"
 
         self.stockdata = StockData()
         self.hidden_layers = hidden_layers
         self.model_filename = model_name + ".ckpt"
+        self.model_name = os.path.basename(model_name)
 
         self.training_predictors_tf = None
         self.training_classes_tf = None
@@ -67,7 +69,7 @@ class NikkeiModel:
         return training_op
 
     def create_data(self, start_date, end_date):
-        opening_data, closing_data, diff_data, jump_data = self.stockdata.get_daily_data(start_date=start_date, end_date=end_date)
+        opening_data, closing_data, diff_data, jump_data = self.stockdata.get_daily_data(start_date=start_date, end_date=end_date, normalize=False)
         opening_raw, closing_raw, diff_raw, _ = self.stockdata.get_daily_data(start_date=start_date, end_date=end_date, normalize=False, logreturn=False, fill_empty=False)
 
         closing_data["N225_up"] = 0
@@ -131,35 +133,46 @@ class NikkeiModel:
         """
         self.test_predictors_tf, self.test_classes_tf, self.raw_values = self.create_data(start_date, end_date)
 
-    def train(self):
+    def is_trained(self):
+        return os.path.exists(self.model_filename)
+
+    def train(self, eval_on_test=False):
         """ Train model and save it to file.
 
         Train model with given hidden layers. Training data is created
         by prepare_training_data(), which must be called before this function.
         """
+        tf.reset_default_graph()
         with tf.Session() as sess:
             feature_data = tf.placeholder("float", [None, self.num_predictors])
             labels = tf.placeholder("float", [None, self.num_classes])
 
             layers = [self.num_predictors] + self.hidden_layers + [self.num_classes]
-            experiment_name = '-'.join([str(n) for n in layers])
             model = self.inference(feature_data, layers)
             cost, cost_summary_op = self.loss(model, labels)
             training_op = self.training(cost, learning_rate=0.0001)
 
             correct_prediction = tf.equal(tf.argmax(model, 1), tf.argmax(labels, 1))
             accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
-            accuracy_op_train = tf.scalar_summary("Accuracy on Train", accuracy)
 
             # Merge all variable summaries and save the results to log file
-            summary_op = tf.merge_all_summaries()
-            # summary_op_train = tf.merge_summary([cost_summary_op, accuracy_op_train])
-            # summary_op_test = tf.merge_summary([accuracy_op_test])
-            summary_writer = tf.train.SummaryWriter(self.log_dir + experiment_name, sess.graph)
+            # summary_op = tf.merge_all_summaries()
+            accuracy_op_train = tf.scalar_summary("Accuracy on Train", accuracy)
+            summary_op_train = tf.merge_summary([cost_summary_op, accuracy_op_train])
+            if eval_on_test:
+                accuracy_op_test = tf.scalar_summary("Accuracy on Test", accuracy)
+                summary_op_test = tf.merge_summary([accuracy_op_test])
+
+            summary_writer = tf.train.SummaryWriter(self.log_dir + self.model_name, sess.graph)
 
             train_dict = {
                 feature_data: self.training_predictors_tf.values,
                 labels: self.training_classes_tf.values.reshape(len(self.training_classes_tf.values), self.num_classes)}
+
+            if eval_on_test:
+                test_dict = {
+                    feature_data: self.test_predictors_tf.values,
+                    labels: self.test_classes_tf.values.reshape(len(self.test_classes_tf.values), self.num_classes)}
 
             init = tf.initialize_all_variables()
             sess.run(init)
@@ -169,8 +182,11 @@ class NikkeiModel:
 
                 # Write summary to log
                 if i % 100 == 0:
-                    summary_str = sess.run(summary_op, feed_dict=train_dict)
+                    summary_str = sess.run(summary_op_train, feed_dict=train_dict)
                     summary_writer.add_summary(summary_str, i)
+                    if eval_on_test:
+                        summary_str = sess.run(summary_op_test, feed_dict=test_dict)
+                        summary_writer.add_summary(summary_str, i)
                     summary_writer.flush()
 
                 # Print current accuracy to console
@@ -372,6 +388,7 @@ class NikkeiModel:
         predictors_tf["N225_jump"] = (n225_open / raw_values.values[0]) - 1
         # print("Yesterday's N225 close value was", raw_values.values[0])
         # print("Will use this value for N225_jump:", predictors_tf["N225_jump"].values[0])
+
 
         tf.reset_default_graph()
         with tf.Session() as sess:
